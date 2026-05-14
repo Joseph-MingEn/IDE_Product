@@ -29,7 +29,7 @@ npm run watch
 ## Settings
 
 - `localAi.ollamaUrl`（預設 `http://127.0.0.1:11434`）
-- `localAi.model`（預設 `llama3.2`）
+- `localAi.model`（預設 `qwen2.5-coder:7b`）
 
 ## UI
 

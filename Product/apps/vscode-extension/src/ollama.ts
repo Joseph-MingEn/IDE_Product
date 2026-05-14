@@ -7,11 +7,19 @@ export async function ollamaChat(
   baseUrl: string,
   model: string,
   userText: string,
+  systemInstruction?: string,
 ): Promise<string> {
   const url = `${baseUrl.replace(/\/$/, '')}/api/chat`;
+  const messages =
+    typeof systemInstruction === 'string' && systemInstruction.trim().length > 0
+      ? [
+          { role: 'system' as const, content: systemInstruction },
+          { role: 'user' as const, content: userText },
+        ]
+      : [{ role: 'user' as const, content: userText }];
   const body = {
     model,
-    messages: [{ role: 'user', content: userText }],
+    messages,
     stream: false,
   };
   const res = await fetch(url, {

@@ -1,0 +1,75 @@
+{
+  "name": "@local-ai/vscode-extension",
+  "displayName": "Local AI Chat",
+  "description": "Minimal sidebar chat using local Ollama.",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "local-ai",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:localAiChatView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localAiChat",
+          "title": "Local AI",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "localAiChat": [
+        {
+          "type": "webview",
+          "id": "localAiChatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Local AI",
+      "properties": {
+        "localAi.ollamaUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434",
+          "description": "Ollama API base URL (no trailing slash)."
+        },
+        "localAi.model": {
+          "type": "string",
+          "default": "qwen2.5-coder:7b",
+          "description": "Ollama model name for /api/chat."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "npm run compile:extension && npm run compile:webview",
+    "compile:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --outfile=out/extension.js --external:vscode",
+    "compile:webview": "esbuild src/webview/main.tsx --bundle --platform=browser --target=es2020 --format=iife --outfile=out/webview.js --loader:.tsx=tsx --jsx=automatic",
+    "watch": "concurrently -k \"npm:watch:extension\" \"npm:watch:webview\"",
+    "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --outfile=out/extension.js --external:vscode --sourcemap --watch",
+    "watch:webview": "esbuild src/webview/main.tsx --bundle --platform=browser --target=es2020 --format=iife --outfile=out/webview.js --loader:.tsx=tsx --jsx=automatic --sourcemap --watch",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/vscode": "^1.85.0",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

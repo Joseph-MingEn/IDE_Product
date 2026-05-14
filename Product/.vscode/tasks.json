@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "watch-vscode-extension",
+      "type": "npm",
+      "script": "watch",
+      "path": "apps/vscode-extension",
+      "isBackground": true,
+      "problemMatcher": ["$esbuild-watch"],
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "compile-vscode-extension",
+      "type": "npm",
+      "script": "compile",
+      "path": "apps/vscode-extension",
+      "problemMatcher": ["$esbuild"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

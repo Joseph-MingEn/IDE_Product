@@ -26,16 +26,16 @@
 
 ## Phase 1.5 — MCP
 
-- `packages/mcp`：client、設定檔、與 `agent-core` 工具合併
+- `packages/mcp-tools`：client、設定檔、與 `agent-runtime` 工具合併
 - 至少一個官方 MCP server 走通
 
 ---
 
 ## Phase 2 — RAG、多檔、記憶
 
-- `packages/rag`：索引管線；Chroma **或** FAISS 擇一為預設（見 `docs/system_architecture.md` 決策表）
+- `packages/rag-indexer`：索引管線；Chroma **或** FAISS 擇一為預設（見 `docs/system_architecture.md` 決策表）
 - Multi-file editing 強化
-- `packages/memory`：跨 session 專案記憶
+- 跨 session **memory**：可先併入 `agent-runtime` 或日後獨立套件
 
 ---
 

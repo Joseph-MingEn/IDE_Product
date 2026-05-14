@@ -25,12 +25,11 @@
 
 | 本產品 package | 可對照參考 |
 |----------------|------------|
-| `agent-core` | Cline／Aider／Continue 的 agent 迴圈（僅概念） |
-| `llm-router` | Ollama／OpenAI 相容用戶端模式 |
-| `tools` | Cline、Aider、openhands-aci 之檔案／終端工具邊界 |
-| `mcp` | MCP 規格 repo + Cline MCP 整合經驗 |
-| `rag` | Chroma／FAISS 官方用法；chunk 可結合 tree-sitter |
-| `memory` | Master plan Phase 2「project memory」 |
+| `agent-runtime` | Cline／Aider／Continue 的 agent 迴圈與內建工具邊界（僅概念） |
+| `ai-core` | Ollama／OpenAI 相容用戶端模式 |
+| `mcp-tools` | MCP 規格 repo + Cline MCP 整合經驗 |
+| `rag-indexer` | Chroma／FAISS 官方用法；chunk 可結合 tree-sitter |
+| （memory） | Master plan Phase 2「project memory」— 可先併入 `agent-runtime` |
 | `apps/desktop` | 桌面體驗參考 Cline webview 與 Tauri 慣例 |
 | `apps/vscode-extension` | Cline／Continue 擴充打包與訊息通道 |
 
@@ -49,6 +48,6 @@
 
 ## 功能重疊提醒
 
-多個參考專案皆涵蓋「對話 + 工具 + 編輯」；本產品維持 **單一 `agent-core` + `tools` + `mcp`**，避免平行實作多套 agent。
+多個參考專案皆涵蓋「對話 + 工具 + 編輯」；本產品維持 **單一 `agent-runtime` + `mcp-tools` + `ai-core`**，避免平行實作多套 agent。
 
 詳見 `docs/system_architecture.md`。

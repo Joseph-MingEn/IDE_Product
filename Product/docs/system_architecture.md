@@ -10,9 +10,9 @@
 
 1. **單一編排進程**：LLM 呼叫、工具執行、RAG、MCP 由同一 **FastAPI** 宿主載入（宿主目錄於 Phase 0 建立，見 `tasks/phase_0_setup.md`）。
 2. **雙殼、一後端**：`apps/desktop`（Tauri）與 `apps/vscode-extension` 僅負責 UI／編輯器整合，不重複 agent 邏輯。
-3. **packages 為邏輯核心**：`packages/agent-core` 等可被 FastAPI 以本機 package 方式匯入（路徑對齊於 Phase 0）。
-4. **參考 repo 不進 build**：`cline-main` 等僅供閱讀；依賴以官方發佈物為準。
-5. **LLM 可替換**：`packages/llm-router` 對齊 Ollama 與 OpenAI 相容端點（含 NIM、`llama-server`）。
+3. **packages 為邏輯核心**：`packages/ai-core`、`packages/agent-runtime` 等由 FastAPI 宿主匯入（宿主目錄於 Phase 0 建立）。
+4. **參考 repo 不進 Git**：`cline-main` 等僅本機 clone；根 `.gitignore` 已排除，依賴以官方發佈物為準。
+5. **LLM 可替換**：`packages/ai-core` 對齊 Ollama 與 OpenAI 相容端點（含 NIM、`llama-server`）。
 
 ---
 
@@ -30,33 +30,27 @@ flowchart TB
   end
 
   subgraph pkgs [packages]
-    AC[agent-core]
-    LLM[llm-router]
-    TL[tools]
-    MC[mcp]
-    RG[rag]
-    MEM[memory]
-    SH[shared]
+    AIC[ai-core]
+    AR[agent-runtime]
+    MT[mcp-tools]
+    RIX[rag-indexer]
   end
 
   subgraph ext [External]
     OLL[Ollama NIM llama-server]
-    MCP[MCP servers]
+    MS[MCP servers]
     VDB[(Chroma or FAISS)]
   end
 
   DT <--> API
   VS <--> API
-  API --> AC
-  AC --> LLM
-  AC --> TL
-  AC --> MC
-  AC --> RG
-  AC --> MEM
-  AC --> SH
-  LLM --> OLL
-  MC --> MCP
-  RG --> VDB
+  API --> AR
+  AR --> AIC
+  AR --> MT
+  AR --> RIX
+  AIC --> OLL
+  MT --> MS
+  RIX --> VDB
 ```
 
 ---
@@ -66,22 +60,21 @@ flowchart TB
 ```
 .
 ├── apps/
-│   ├── desktop/                 # Tauri + React + TypeScript
-│   └── vscode-extension/      # VS Code extension
+│   ├── desktop/                 # Tauri + React（預留）
+│   └── vscode-extension/        # VS Code extension
 ├── packages/
-│   ├── agent-core/
-│   ├── llm-router/
-│   ├── tools/
-│   ├── rag/
-│   ├── memory/
-│   ├── mcp/
-│   └── shared/
+│   ├── ai-core/                 # LLM／prompt／共用抽象
+│   ├── agent-runtime/           # Agent 執行期、tool loop
+│   ├── mcp-tools/               # MCP 客戶端與工具整合
+│   └── rag-indexer/             # RAG 索引與檢索
 ├── docs/
+├── scripts/
 ├── tasks/
-└── PROJECT_MASTER_PLAN.md     # 可為導向 docs 之 stub
+├── .gitignore                   # 排除 vendor／大型媒體／模型等
+└── PROJECT_MASTER_PLAN.md     # stub → docs/PROJECT_MASTER_PLAN.md
 ```
 
-**說明**：歷史目錄（若仍存在）如根層 `backend/`、`frontend/`、`agent/` 等**不屬**本 skeleton；Phase 0 清理或遷移，以 `apps/` + `packages/` 為準。
+**說明**：上游 mirror（`cline-main` 等）請僅本機擁有，勿提交；已列於根 `.gitignore`。若歷史中仍被追蹤，需另執行 `git rm -r --cached` 後再 commit。
 
 ---
 
@@ -89,15 +82,13 @@ flowchart TB
 
 | 路徑 | 職責 |
 |------|------|
-| `packages/agent-core` | Tool loop、對話狀態、取消、步數／token 預算 |
-| `packages/llm-router` | 供應商無關的 chat／stream 介面與設定 |
-| `packages/tools` | 內建工具實作與註冊表 |
-| `packages/mcp` | MCP 傳輸與工具列表合併；不實作第三方 server |
-| `packages/rag` | Chunk、embed、索引、查詢 |
-| `packages/memory` | 專案記憶讀寫抽象 |
-| `packages/shared` | 設定模型、錯誤型別、共用常數 |
-| `apps/desktop` | 視窗、本機檔案／終端橋、與 API 通訊 |
-| `apps/vscode-extension` | 命令、設定、與同一 API 通訊 |
+| `packages/ai-core` | LLM 介面、供應商設定、prompt／型別共用 |
+| `packages/agent-runtime` | Tool loop、對話狀態、取消、步數／token 預算 |
+| `packages/mcp-tools` | MCP 傳輸、工具列表合併；不實作第三方 server |
+| `packages/rag-indexer` | Chunk、embed、索引、查詢 |
+| `apps/desktop` | 視窗、本機檔案／終端橋、與 API 通訊（預留） |
+| `apps/vscode-extension` | 命令、設定、與後端／Ollama 通訊 |
+| `scripts/` | 建置、索引、release 輔助腳本 |
 
 ---
 

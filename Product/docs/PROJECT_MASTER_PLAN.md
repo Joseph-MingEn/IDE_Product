@@ -26,7 +26,7 @@
 
 - **桌面**：Tauri、React、TypeScript  
 - **編排與 API**：Python、FastAPI（API 宿主目錄於 Phase 0 決定，見 `tasks/phase_0_setup.md`）  
-- **邏輯模組**：`packages/*`（agent、LLM 路由、tools、rag、memory、mcp、shared）  
+- **邏輯模組**：`packages/ai-core`、`packages/agent-runtime`、`packages/mcp-tools`、`packages/rag-indexer`  
 - **推論**：Ollama、llama.cpp（`llama-server`）  
 - **模型範例**：Qwen2.5-Coder、DeepSeek-Coder  
 - **RAG 儲存**：ChromaDB、FAISS（擇一為 MVP 後預設）  

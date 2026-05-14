@@ -10,13 +10,11 @@
 ## 後端與 packages
 
 - [ ] FastAPI 宿主：對外 REST 或 WebSocket（串流策略待定）
-- [ ] `packages/llm-router`：Ollama chat；OpenAI 相容 `base_url`（**NIM**）
-- [ ] `packages/agent-core`：單／多步 tool loop、取消 token
-- [ ] `packages/tools`：`read_file`、`list_dir`、`grep`（或 rg 包裝）、`write_file` 或 patch
-- [ ] `packages/shared`：設定模型（工作區根、模型名、API key 欄位規劃）
-- [ ] `packages/mcp`：**可 stub**（回傳空工具表）；完整 MCP 屬 Phase 1.5
-- [ ] `packages/rag`：**no-op** 或可選關閉
-- [ ] `packages/memory`：**session-only** 即可
+- [ ] `packages/ai-core`：Ollama chat；OpenAI 相容 `base_url`（**NIM**）；共用設定 schema
+- [ ] `packages/agent-runtime`：單／多步 tool loop、取消 token；內建 `read_file`／`list_dir`／`grep`／`write_file`（或 patch）
+- [ ] `packages/mcp-tools`：**可 stub**（回傳空工具表）；完整 MCP 屬 Phase 1.5
+- [ ] `packages/rag-indexer`：**no-op** 或可選關閉
+- [ ] 跨 session **memory**：可先併入 `agent-runtime`（session-only）或日後獨立套件
 
 ---
 
@@ -38,7 +36,7 @@
 ## VS Code（可晚於桌面）
 
 - [ ] `apps/vscode-extension`：最小啟動命令「連線本機 API」
-- [ ] 不重複實作 `agent-core`（僅客戶端）
+- [ ] 不重複實作 `agent-runtime`（僅客戶端）
 
 ---
 

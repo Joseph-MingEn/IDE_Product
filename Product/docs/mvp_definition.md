@@ -17,15 +17,15 @@
 | M3 | 讀碼上下文 | 讀檔、列目錄、專案內搜尋；**不要求** 向量 RAG。 |
 | M4 | 檔案編輯 | 至少一種安全套用流程（整檔或 patch）。 |
 | M5 | 終端 | 於工作區內執行；**allowlist 或逐步確認** 擇一為最低安全線。 |
-| M6 | LLM | `packages/llm-router`：**Ollama** 為預設；可設定 OpenAI 相容 URL（**NIM**）。 |
+| M6 | LLM | `packages/ai-core`：**Ollama** 為預設；可設定 OpenAI 相容 URL（**NIM**）。 |
 
 ---
 
 ## 2. MVP 不包含
 
-- **MCP 完整整合**（延至 roadmap Phase 1.5；`packages/mcp` 可 stub）。
-- **RAG 向量索引**（`packages/rag` 可 no-op；Phase 2）。
-- **跨 session memory 產品化**（`packages/memory` 可 session-only；Phase 2）。
+- **MCP 完整整合**（延至 roadmap Phase 1.5；`packages/mcp-tools` 可 stub）。
+- **RAG 向量索引**（`packages/rag-indexer` 可 no-op；Phase 2）。
+- **跨 session memory 產品化**（可先併入 `agent-runtime`；Phase 2）。
 - **VS Code extension 上架**（`apps/vscode-extension` 可晚於桌面，但目錄保留）。
 - **多檔自主編排完整版**（MVP 允許單檔為主；多檔為 Phase 2 強化）。
 
@@ -37,10 +37,10 @@
 |------------|-----------|
 | UI + OS 能力 | `apps/desktop` |
 | 編排 + API | Phase 0 建立之 FastAPI 宿主（見 `tasks/phase_0_setup.md`） |
-| Agent loop | `packages/agent-core` |
-| LLM | `packages/llm-router` |
-| 內建工具 | `packages/tools` |
-| 共用設定／型別 | `packages/shared` |
+| Agent loop | `packages/agent-runtime` |
+| LLM | `packages/ai-core` |
+| 內建工具 | `packages/agent-runtime` |
+| 共用設定／型別 | `packages/ai-core` |
 
 ---
 

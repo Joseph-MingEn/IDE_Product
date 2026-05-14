@@ -7,7 +7,7 @@
 ## Repository 結構
 
 - [ ] 確認目錄存在：`apps/desktop`、`apps/vscode-extension`
-- [ ] 確認目錄存在：`packages/agent-core`、`llm-router`、`tools`、`rag`、`memory`、`mcp`、`shared`
+- [ ] 確認目錄存在：`packages/ai-core`、`packages/agent-runtime`、`packages/mcp-tools`、`packages/rag-indexer`
 - [ ] 確認 `docs/`、`tasks/` 內主文件為最新（見下方「文件」）
 - [ ] 清理或標註棄用：根目錄舊式 `backend/`、`frontend/`、`agent/` 等（若仍存在）
 
@@ -37,7 +37,7 @@
 
 ## TypeScript / VS Code
 
-- [ ] 決定 extension 與 desktop 是否共用 `packages/shared` 的型別（JSON Schema 優先或 hand-written TS）
+- [ ] 決定 extension 與 desktop 是否共用 `packages/ai-core` 的型別（JSON Schema 優先或 hand-written TS）
 
 ---
 

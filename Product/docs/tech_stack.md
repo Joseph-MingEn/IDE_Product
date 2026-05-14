@@ -27,15 +27,12 @@
 
 | 套件 | 職責 |
 |------|------|
-| `agent-core` | 對話狀態、tool loop、與 LLM 訊息組裝 |
-| `llm-router` | Ollama、OpenAI 相容（NIM、llama-server）統一介面 |
-| `tools` | 內建工具：讀寫檔、終端、grep 等 |
-| `mcp` | MCP client（stdio／可選 streamable HTTP） |
-| `rag` | 索引、embedding、向量查詢 |
-| `memory` | 跨 session 專案記憶（與 RAG 分離） |
-| `shared` | 設定 schema、共用型別、常數、小工具 |
+| `ai-core` | LLM 介面（Ollama、OpenAI 相容含 NIM／llama-server）、設定 schema、共用型別 |
+| `agent-runtime` | 對話狀態、tool loop、內建工具（讀寫檔、終端、grep 等）、取消與預算 |
+| `mcp-tools` | MCP client（stdio／可選 streamable HTTP） |
+| `rag-indexer` | 索引、embedding、向量查詢；跨 session 記憶可先併入或日後獨立 |
 
-語言預設以 **Python** 實作上述 packages（與 FastAPI 同進程匯入）；若未來抽出 TS 共用型別，仍歸 `packages/shared` 子目錄並於架構圖註記。
+語言預設以 **Python** 實作上述 packages（與 FastAPI 同進程匯入）；若未來抽出 TS 共用型別，可置於 `packages/ai-core` 下之子模組或獨立 npm workspace。
 
 ---
 

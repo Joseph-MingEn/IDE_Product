@@ -28,11 +28,22 @@ function looksLikeUnifiedDiff(text: string): boolean {
 export function App(): JSX.Element {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [previewPending, setPreviewPending] = useState<{ active: boolean; label?: string }>({
+    active: false,
+  });
 
   useEffect(() => {
     const handler = (event: MessageEvent<ExtensionToWebview>) => {
       const data = event.data;
       if (!data || typeof data !== 'object') {
+        return;
+      }
+      if (data.type === 'previewPending') {
+        setPreviewPending({ active: true, label: data.relativePath });
+        return;
+      }
+      if (data.type === 'previewCleared') {
+        setPreviewPending({ active: false });
         return;
       }
       if (data.type === 'reply') {
@@ -79,6 +90,17 @@ export function App(): JSX.Element {
           </div>
         ))}
       </div>
+      {previewPending.active ? (
+        <div style={styles.acceptRow}>
+          <button
+            type="button"
+            style={styles.acceptBtn}
+            onClick={() => getVsCodeApi().postMessage({ type: 'acceptPreview' })}
+          >
+            Accept Preview{previewPending.label ? ` (${previewPending.label})` : ''}
+          </button>
+        </div>
+      ) : null}
       <div style={styles.composer}>
         <textarea
           style={styles.input}
@@ -137,6 +159,8 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 4,
   },
   applyBtn: { alignSelf: 'flex-start', padding: '6px 10px', cursor: 'pointer' },
+  acceptRow: { flexShrink: 0, display: 'flex', flexDirection: 'row', alignItems: 'center' },
+  acceptBtn: { padding: '6px 10px', cursor: 'pointer', alignSelf: 'flex-start' },
   composer: {
     flexShrink: 0,
     display: 'flex',

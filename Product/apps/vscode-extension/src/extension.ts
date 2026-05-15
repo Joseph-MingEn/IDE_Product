@@ -7,6 +7,12 @@ import { isWebviewMessage } from './protocol';
 
 const viewType = 'localAiChatView';
 
+type PendingEditPreview = {
+  resource: vscode.Uri;
+  oldText: string;
+  newText: string;
+};
+
 const SYSTEM_INSTRUCTION = [
   '你是運行於 VSCode 的專業 AI coding 助手。',
   '- 請使用繁體中文回答。',
@@ -15,13 +21,16 @@ const SYSTEM_INSTRUCTION = [
   '- 回答請實用、直接，避免空泛寒暄。',
 ].join('\n');
 
-/** System prompt for /edit: model must emit unified diff only (preview; not applied). */
-const SYSTEM_EDIT_DIFF = [
-  '你是 VSCode 中的程式修改助手（diff 預覽原型；本階段不會寫入或套用任何變更）。',
-  '使用者的訊息會包含「要修改的程式碼」（整檔或選取區）與「修改說明」。',
-  '- 請只輸出 GNU unified diff（diff -u）格式，且僅針對訊息中的單一 Active File。',
-  '- 不要包在 markdown 程式碼區塊內；不要輸出前言、結語或額外解釋。',
-  '- 若無法產生合法 diff，請只輸出一行繁體中文原因。',
+/** System prompt for /edit v0.2: model emits full modified file; extension opens diff preview. */
+const SYSTEM_EDIT_FILE = [
+  '你是 VSCode 中的程式修改助手（檔案預覽模式；本階段不會寫入或套用任何變更）。',
+  '使用者訊息會提供 Active File 的完整內容與修改說明；你的輸出將與原檔在編輯器中並排對照。',
+  '- 只輸出「完整修改後的檔案內容」純文字：與原檔相同語言／格式，包含所有未修改與已修改的行。',
+  '- 不要輸出 unified diff、不要輸出 patch、不要輸出 diff --git。',
+  '- 不要輸出 markdown code fence（例如 ``` 或 ```diff）。',
+  '- 不要輸出說明文字、前言或結語。',
+  '- 不要省略未修改的內容；不可只回傳片段或變更摘要。',
+  '- 若無法依指示安全修改，請輸出與訊息中「目前完整檔案」相同的原始完整內容（一字不漏）。',
 ].join('\n');
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -40,10 +49,52 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {}
 
 class ChatViewProvider implements vscode.WebviewViewProvider {
+  private pendingEditPreview: PendingEditPreview | null = null;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly diffPreview: LocalaiDiffPreviewProvider,
   ) {}
+
+  private async handleAcceptPreview(webview: vscode.Webview): Promise<void> {
+    const pending = this.pendingEditPreview;
+    if (!pending) {
+      post(webview, { type: 'error', text: '沒有可套用的預覽，請先執行 /edit。' });
+      return;
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      post(webview, { type: 'error', text: '「Accept Preview」需要作用中編輯器，請開啟與預覽相同的檔案。' });
+      return;
+    }
+    if (editor.document.uri.toString() !== pending.resource.toString()) {
+      post(webview, {
+        type: 'error',
+        text: '作用中編輯器不是產生預覽時的檔案；請先切回該檔案再套用。',
+      });
+      return;
+    }
+    const current = editor.document.getText();
+    if (current !== pending.oldText) {
+      post(webview, {
+        type: 'error',
+        text: '檔案內容已與預覽前不同（可能已手動編輯）。未套用變更；請還原或重新執行 /edit。',
+      });
+      return;
+    }
+    const doc = editor.document;
+    const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(current.length));
+    const wsEdit = new vscode.WorkspaceEdit();
+    wsEdit.replace(doc.uri, fullRange, pending.newText);
+    const applied = await vscode.workspace.applyEdit(wsEdit);
+    if (!applied) {
+      post(webview, { type: 'error', text: 'WorkspaceEdit 套用失敗，緩衝區未變更。' });
+      return;
+    }
+    this.pendingEditPreview = null;
+    post(webview, { type: 'previewCleared' });
+    void vscode.window.showInformationMessage('已將預覽內容套用至編輯器緩衝區（尚未寫入磁碟）。');
+  }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -73,11 +124,23 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         return;
       }
+      if (raw.type === 'acceptPreview') {
+        try {
+          await this.handleAcceptPreview(webview);
+        } catch (e) {
+          const text = e instanceof Error ? e.message : String(e);
+          post(webview, { type: 'error', text });
+        }
+        return;
+      }
 
       const cfg = vscode.workspace.getConfiguration('localAi');
       const baseUrl = String(cfg.get('ollamaUrl') ?? 'http://127.0.0.1:11434');
       const model = String(cfg.get('model') ?? 'qwen2.5-coder:7b');
       try {
+        if (raw.type !== 'chat') {
+          return;
+        }
         const rawText = raw.text;
         if (rawText.startsWith('/edit')) {
           const editor = vscode.window.activeTextEditor;
@@ -90,8 +153,30 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
           }
           const instruction = rawText.replace(/^\s*\/edit\s*/, '').trim();
           const userMessage = buildEditUserMessage(instruction, editor);
-          const text = await ollamaChat(baseUrl, model, userMessage, SYSTEM_EDIT_DIFF);
-          post(webview, { type: 'reply', text });
+          const oldText = editor.document.getText();
+          const modelText = await ollamaChat(baseUrl, model, userMessage, SYSTEM_EDIT_FILE);
+          const newText = sanitizeModelFileOutput(modelText);
+          const rightUri = this.diffPreview.createPreviewUri(editor.document.uri.fsPath);
+          this.diffPreview.setContent(rightUri, newText);
+          const rel = vscode.workspace.asRelativePath(editor.document.uri, false);
+          const title = `Local AI 預覽 — ${rel}`;
+          await vscode.commands.executeCommand('vscode.diff', editor.document.uri, rightUri, title);
+          void vscode.window.showInformationMessage(
+            '右側為 AI 產生的完整檔案預覽（僅存在記憶體），不會自動寫入磁碟；左側為目前編輯器內容。請自行比對後再決定是否儲存。',
+          );
+          this.pendingEditPreview = {
+            resource: editor.document.uri,
+            oldText,
+            newText,
+          };
+          post(webview, { type: 'previewPending', relativePath: rel });
+          post(webview, {
+            type: 'reply',
+            text:
+              newText === oldText
+                ? '已開啟 diff 預覽：模型回傳與目前檔案內容相同（右側為對照預覽，未寫入磁碟）。'
+                : '已開啟 diff 預覽：右側為完整檔案內容（僅預覽，未寫入磁碟）。',
+          });
           return;
         }
 
@@ -108,6 +193,88 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
 function post(webview: vscode.Webview, msg: ExtensionToWebview): void {
   void webview.postMessage(msg);
+}
+
+/**
+ * LLM full-file output: normalize newlines, strip outer ``` fences only.
+ * Does not trim leading whitespace or file body; collapses 2+ trailing newlines to one.
+ */
+function sanitizeModelFileOutput(text: string): string {
+  let s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = s.split('\n');
+  const unwrapped = stripMarkdownFenceEdges(lines);
+  s = unwrapped.join('\n');
+  s = s.replace(/\n{2,}\z/, '\n');
+  return s;
+}
+
+/** Minimal LLM diff cleanup: fences, newlines, preamble — does not repair hunks. */
+function sanitizeUnifiedDiff(text: string): string {
+  let s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = s.split('\n');
+  const unwrapped = stripMarkdownFenceEdges(lines);
+  s = unwrapped.join('\n');
+  s = s.trim();
+  s = stripDiffLeadingPreamble(s);
+  return s.trim();
+}
+
+function isMarkdownFenceLine(line: string): boolean {
+  return /^[\t ]*```[\w-]*[\t ]*$/.test(line);
+}
+
+/** Removes only leading/trailing ``` / ```lang lines so in-diff ``` lines stay intact. */
+function stripMarkdownFenceEdges(lines: string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && isMarkdownFenceLine(lines[start])) {
+    start++;
+  }
+  while (end > start && isMarkdownFenceLine(lines[end - 1])) {
+    end--;
+  }
+  return lines.slice(start, end);
+}
+
+/** Keeps text from the first line that starts a git or unified diff header. */
+function stripDiffLeadingPreamble(s: string): string {
+  const lines = s.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trimStart();
+    if (t.startsWith('diff --git') || t.startsWith('---')) {
+      return lines.slice(i).join('\n');
+    }
+  }
+  return s;
+}
+
+/**
+ * Rejects obvious garbage inside @@ hunks before applyPatch (no repair).
+ * Returns an error message, or null if OK.
+ */
+function validateUnifiedDiffForApplyPatch(diff: string): string | null {
+  const lines = diff.split('\n');
+  let inHunk = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineNumber = i + 1;
+    if (/^@@/.test(line)) {
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) {
+      continue;
+    }
+    if (line === '') {
+      continue;
+    }
+    const ch = line[0];
+    if (ch === ' ' || ch === '\t' || ch === '+' || ch === '-' || ch === '\\') {
+      continue;
+    }
+    return `diff 格式不合法：第 ${lineNumber} 行位於 hunk 內，但沒有以空白、+、- 或 \\ 開頭。模型可能輸出了不完整 unified diff，請重新生成。`;
+  }
+  return null;
 }
 
 /**
@@ -128,9 +295,15 @@ async function handleApplyDiffPreview(
     return;
   }
   const source = editor.document.getText();
+  const cleaned = sanitizeUnifiedDiff(diffText);
+  const diffValidationError = validateUnifiedDiffForApplyPatch(cleaned);
+  if (diffValidationError !== null) {
+    post(webview, { type: 'error', text: diffValidationError });
+    return;
+  }
   let patched: string | false;
   try {
-    patched = applyPatch(source, diffText.trim());
+    patched = applyPatch(source, cleaned);
   } catch (e) {
     const text = e instanceof Error ? e.message : String(e);
     post(webview, { type: 'error', text: `解析或套用 diff 失敗：${text}` });
@@ -155,45 +328,30 @@ async function handleApplyDiffPreview(
 }
 
 /**
- * /edit flow: instruct model to emit unified diff only; code base is selection or full file.
+ * /edit v0.2: model outputs full modified file; optional selection is edit focus only.
  */
 function buildEditUserMessage(instruction: string, editor: vscode.TextEditor): string {
   const doc = editor.document;
   const filePath = doc.uri.fsPath;
   const languageId = doc.languageId;
+  const fullFileContent = doc.getText();
   const selectedRaw = doc.getText(editor.selection);
   const hasSelection = selectedRaw.trim().length > 0;
+  const sel = editor.selection;
+  const startLine0 = Math.min(sel.start.line, sel.end.line);
+  const endLine0 = Math.max(sel.start.line, sel.end.line);
+  const selectionStart = startLine0 + 1;
+  const selectionEnd = endLine0 + 1;
 
-  if (hasSelection) {
-    return [
-      'Command: /edit (diff preview — 不會寫入檔案)',
-      '',
-      'Edit Instruction:',
-      instruction.length > 0 ? instruction : '(未提供額外說明，請依程式意圖提出最小合理修改)',
-      '',
-      'Context Mode: selection',
-      '',
-      'Active File:',
-      filePath,
-      '',
-      'Language:',
-      languageId,
-      '',
-      'Code to modify (selection only):',
-      selectedRaw,
-      '',
-      '請只輸出 unified diff（GNU diff -u）。',
-    ].join('\n');
-  }
+  const contextMode = hasSelection ? 'selection' : 'full-file';
 
-  const fullFileContent = doc.getText();
-  return [
-    'Command: /edit (diff preview — 不會寫入檔案)',
+  const parts: string[] = [
+    'Command: /edit (full-file preview — 不會寫入磁碟)',
     '',
     'Edit Instruction:',
     instruction.length > 0 ? instruction : '(未提供額外說明，請依程式意圖提出最小合理修改)',
     '',
-    'Context Mode: full-file',
+    `Context Mode: ${contextMode}`,
     '',
     'Active File:',
     filePath,
@@ -201,11 +359,33 @@ function buildEditUserMessage(instruction: string, editor: vscode.TextEditor): s
     'Language:',
     languageId,
     '',
-    'Code to modify (full file):',
+    '重要：你的輸出必須是「完整修改後的檔案內容」純文字（與下方整檔同一結構），不是 unified diff、不是 patch、不是摘要。',
+    '無論是否有 selection，都必須輸出整份檔案；未改動的段落需原樣保留。',
+    'Selection（若有）僅標示修改焦點，輸出仍須為整檔。',
+    '',
+  ];
+
+  if (hasSelection) {
+    parts.push(
+      'Edit focus (selection — 請優先在此範圍內改動，但回覆仍須包含整份檔案):',
+      '',
+      `selectionStart (line, 1-based): ${selectionStart}`,
+      `selectionEnd (line, 1-based): ${selectionEnd}`,
+      '',
+      'Selected text:',
+      selectedRaw,
+      '',
+    );
+  }
+
+  parts.push(
+    'Current full file (請據此產出修改後的完整檔案內容):',
     fullFileContent,
     '',
-    '請只輸出 unified diff（GNU diff -u）。',
-  ].join('\n');
+    '請只輸出完整修改後的檔案內容（純文字）。',
+  );
+
+  return parts.join('\n');
 }
 
 /**

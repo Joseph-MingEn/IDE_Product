@@ -12,7 +12,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:localAiChatView"
+    "onView:localAiChatView",
+    "onCommand:localAi.runTool"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -34,6 +35,13 @@
         }
       ]
     },
+    "commands": [
+      {
+        "command": "localAi.runTool",
+        "title": "Run Tool (Debug)",
+        "category": "Local AI"
+      }
+    ],
     "configuration": {
       "title": "Local AI",
       "properties": {

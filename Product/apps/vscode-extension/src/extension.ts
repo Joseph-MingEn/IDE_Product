@@ -15,6 +15,7 @@ import {
 import { buildEditUserMessage, getEditSystemPrompt } from './prompts/editPrompt';
 import type { ChatMessage, ExtensionToWebview } from './protocol';
 import { isWebviewMessage } from './protocol';
+import { registerRunToolCommand } from './tools/runToolCommand';
 
 const viewType = 'localAiChatView';
 const CHAT_HISTORY_KEY = 'localAi.chatHistory';
@@ -38,6 +39,7 @@ export function activate(context: vscode.ExtensionContext): void {
       webviewOptions: { retainContextWhenHidden: true },
     }),
   );
+  registerRunToolCommand(context);
 }
 
 export function deactivate(): void {}

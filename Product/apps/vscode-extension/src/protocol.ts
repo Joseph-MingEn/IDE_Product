@@ -1,15 +1,25 @@
+/** Persisted / hydrated chat entry (max 50 in workspaceState). */
+export type ChatMessage = { role: 'user' | 'assistant'; text: string };
+
 /** Messages from webview → extension host */
 export type WebviewToExtension =
   | { type: 'chat'; text: string }
   | { type: 'applyDiff'; diffText: string }
-  | { type: 'acceptPreview' };
+  | { type: 'acceptPreview' }
+  | { type: 'rejectPreview' }
+  | { type: 'getPreviewState' }
+  | { type: 'clearHistory' };
 
 /** Messages from extension host → webview */
 export type ExtensionToWebview =
   | { type: 'reply'; text: string }
+  | { type: 'replyStart' }
+  | { type: 'replyDelta'; text: string }
+  | { type: 'replyDone' }
   | { type: 'error'; text: string }
   | { type: 'previewPending'; relativePath?: string }
-  | { type: 'previewCleared' };
+  | { type: 'previewCleared' }
+  | { type: 'hydrateMessages'; messages: ChatMessage[] };
 
 export function isWebviewMessage(value: unknown): value is WebviewToExtension {
   if (!value || typeof value !== 'object') {
@@ -23,6 +33,15 @@ export function isWebviewMessage(value: unknown): value is WebviewToExtension {
     return true;
   }
   if (o.type === 'acceptPreview') {
+    return true;
+  }
+  if (o.type === 'rejectPreview') {
+    return true;
+  }
+  if (o.type === 'getPreviewState') {
+    return true;
+  }
+  if (o.type === 'clearHistory') {
     return true;
   }
   return false;

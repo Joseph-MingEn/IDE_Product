@@ -1,44 +1,33 @@
 import { applyPatch } from 'diff';
 import * as vscode from 'vscode';
 import { LOCALAI_PREVIEW_SCHEME, LocalaiDiffPreviewProvider } from './diffPreviewProvider';
-import { ollamaChat } from './ollama';
-import type { ExtensionToWebview } from './protocol';
+import { ollamaChat, ollamaChatMessagesStream } from './ollama';
+import {
+  buildChatUserMessage,
+  buildOllamaChatMessages,
+  getChatSystemPrompt,
+} from './prompts/chatPrompt';
+import { buildEditUserMessage, getEditSystemPrompt } from './prompts/editPrompt';
+import type { ChatMessage, ExtensionToWebview } from './protocol';
 import { isWebviewMessage } from './protocol';
 
 const viewType = 'localAiChatView';
+const CHAT_HISTORY_KEY = 'localAi.chatHistory';
+const MAX_CHAT_HISTORY = 50;
 
 type PendingEditPreview = {
   resource: vscode.Uri;
+  previewUri: vscode.Uri;
   oldText: string;
   newText: string;
 };
-
-const SYSTEM_INSTRUCTION = [
-  '你是運行於 VSCode 的專業 AI coding 助手。',
-  '- 請使用繁體中文回答。',
-  '- 若 Context Mode 為 selection，請優先分析訊息中「Code Context」內的選取內容。',
-  '- 請勿臆測或假裝讀過未在本訊息中提供的檔案或程式碼。',
-  '- 回答請實用、直接，避免空泛寒暄。',
-].join('\n');
-
-/** System prompt for /edit v0.2: model emits full modified file; extension opens diff preview. */
-const SYSTEM_EDIT_FILE = [
-  '你是 VSCode 中的程式修改助手（檔案預覽模式；本階段不會寫入或套用任何變更）。',
-  '使用者訊息會提供 Active File 的完整內容與修改說明；你的輸出將與原檔在編輯器中並排對照。',
-  '- 只輸出「完整修改後的檔案內容」純文字：與原檔相同語言／格式，包含所有未修改與已修改的行。',
-  '- 不要輸出 unified diff、不要輸出 patch、不要輸出 diff --git。',
-  '- 不要輸出 markdown code fence（例如 ``` 或 ```diff）。',
-  '- 不要輸出說明文字、前言或結語。',
-  '- 不要省略未修改的內容；不可只回傳片段或變更摘要。',
-  '- 若無法依指示安全修改，請輸出與訊息中「目前完整檔案」相同的原始完整內容（一字不漏）。',
-].join('\n');
 
 export function activate(context: vscode.ExtensionContext): void {
   const diffPreview = new LocalaiDiffPreviewProvider();
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(LOCALAI_PREVIEW_SCHEME, diffPreview),
   );
-  const provider = new ChatViewProvider(context.extensionUri, diffPreview);
+  const provider = new ChatViewProvider(context.extensionUri, diffPreview, context);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(viewType, provider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -50,11 +39,57 @@ export function deactivate(): void {}
 
 class ChatViewProvider implements vscode.WebviewViewProvider {
   private pendingEditPreview: PendingEditPreview | null = null;
+  private chatHistory: ChatMessage[];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly diffPreview: LocalaiDiffPreviewProvider,
-  ) {}
+    private readonly context: vscode.ExtensionContext,
+  ) {
+    this.chatHistory = loadChatHistory(this.context);
+  }
+
+  private persistChatHistory(): void {
+    const trimmed = this.chatHistory.slice(-MAX_CHAT_HISTORY);
+    this.chatHistory = trimmed;
+    void this.context.workspaceState.update(CHAT_HISTORY_KEY, trimmed);
+  }
+
+  private appendChatMessage(msg: ChatMessage): void {
+    if (msg.role === 'assistant' && msg.text.length === 0) {
+      return;
+    }
+    this.chatHistory.push(msg);
+    this.persistChatHistory();
+  }
+
+  private postHydrate(webview: vscode.Webview): void {
+    post(webview, { type: 'hydrateMessages', messages: [...this.chatHistory] });
+  }
+
+  private handleClearHistory(webview: vscode.Webview): void {
+    this.chatHistory = [];
+    void this.context.workspaceState.update(CHAT_HISTORY_KEY, []);
+    post(webview, { type: 'hydrateMessages', messages: [] });
+  }
+
+  private handleRejectPreview(webview: vscode.Webview): void {
+    const previewUri = this.pendingEditPreview?.previewUri;
+    this.pendingEditPreview = null;
+    if (previewUri) {
+      void closePreviewTab(previewUri);
+    }
+    post(webview, { type: 'previewCleared' });
+  }
+
+  private handleGetPreviewState(webview: vscode.Webview): void {
+    const pending = this.pendingEditPreview;
+    if (!pending) {
+      return;
+    }
+    const rel = vscode.workspace.asRelativePath(pending.resource, false);
+    post(webview, { type: 'previewPending', relativePath: rel });
+  }
 
   private async handleAcceptPreview(webview: vscode.Webview): Promise<void> {
     const pending = this.pendingEditPreview;
@@ -91,8 +126,10 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
       post(webview, { type: 'error', text: 'WorkspaceEdit 套用失敗，緩衝區未變更。' });
       return;
     }
+    const previewUri = pending.previewUri;
     this.pendingEditPreview = null;
     post(webview, { type: 'previewCleared' });
+    void closePreviewTab(previewUri);
     void vscode.window.showInformationMessage('已將預覽內容套用至編輯器緩衝區（尚未寫入磁碟）。');
   }
 
@@ -110,6 +147,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
     const nonce = String(Date.now());
     webview.html = getHtml(scriptUri, nonce, webview.cspSource);
+    this.postHydrate(webview);
 
     webview.onDidReceiveMessage(async (raw: unknown) => {
       if (!isWebviewMessage(raw)) {
@@ -133,6 +171,18 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         return;
       }
+      if (raw.type === 'rejectPreview') {
+        this.handleRejectPreview(webview);
+        return;
+      }
+      if (raw.type === 'getPreviewState') {
+        this.handleGetPreviewState(webview);
+        return;
+      }
+      if (raw.type === 'clearHistory') {
+        this.handleClearHistory(webview);
+        return;
+      }
 
       const cfg = vscode.workspace.getConfiguration('localAi');
       const baseUrl = String(cfg.get('ollamaUrl') ?? 'http://127.0.0.1:11434');
@@ -143,49 +193,91 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         const rawText = raw.text;
         if (rawText.startsWith('/edit')) {
+          this.appendChatMessage({ role: 'user', text: rawText });
           const editor = vscode.window.activeTextEditor;
           if (!editor) {
-            post(webview, {
-              type: 'error',
-              text: '「/edit」需要作用中編輯器：請先開啟要修改的檔案，再送出指令。',
-            });
+            const errText = '「/edit」需要作用中編輯器：請先開啟要修改的檔案，再送出指令。';
+            post(webview, { type: 'error', text: errText });
+            this.appendChatMessage({ role: 'assistant', text: `Error: ${errText}` });
             return;
           }
           const instruction = rawText.replace(/^\s*\/edit\s*/, '').trim();
           const userMessage = buildEditUserMessage(instruction, editor);
           const oldText = editor.document.getText();
-          const modelText = await ollamaChat(baseUrl, model, userMessage, SYSTEM_EDIT_FILE);
+          const modelText = await ollamaChat(baseUrl, model, userMessage, getEditSystemPrompt());
           const newText = sanitizeModelFileOutput(modelText);
+          const sanityError = validateEditModelOutput(oldText, modelText, newText);
+          if (sanityError !== null) {
+            post(webview, { type: 'error', text: sanityError });
+            this.appendChatMessage({ role: 'assistant', text: `Error: ${sanityError}` });
+            return;
+          }
           const rightUri = this.diffPreview.createPreviewUri(editor.document.uri.fsPath);
           this.diffPreview.setContent(rightUri, newText);
           const rel = vscode.workspace.asRelativePath(editor.document.uri, false);
           const title = `Local AI 預覽 — ${rel}`;
-          await vscode.commands.executeCommand('vscode.diff', editor.document.uri, rightUri, title);
+          await vscode.commands.executeCommand(
+            'vscode.diff',
+            editor.document.uri,
+            rightUri,
+            title,
+            { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+          );
           void vscode.window.showInformationMessage(
             '右側為 AI 產生的完整檔案預覽（僅存在記憶體），不會自動寫入磁碟；左側為目前編輯器內容。請自行比對後再決定是否儲存。',
           );
           this.pendingEditPreview = {
             resource: editor.document.uri,
+            previewUri: rightUri,
             oldText,
             newText,
           };
           post(webview, { type: 'previewPending', relativePath: rel });
-          post(webview, {
-            type: 'reply',
-            text:
-              newText === oldText
-                ? '已開啟 diff 預覽：模型回傳與目前檔案內容相同（右側為對照預覽，未寫入磁碟）。'
-                : '已開啟 diff 預覽：右側為完整檔案內容（僅預覽，未寫入磁碟）。',
-          });
+          const statusText =
+            newText === oldText
+              ? '已開啟 diff 預覽：模型回傳與目前檔案內容相同（右側為對照預覽，未寫入磁碟）。'
+              : '已開啟 diff 預覽：右側為完整檔案內容（僅預覽，未寫入磁碟）。';
+          post(webview, { type: 'reply', text: statusText });
+          this.appendChatMessage({ role: 'assistant', text: statusText });
           return;
         }
 
-        const userMessage = buildChatUserMessage(rawText);
-        const text = await ollamaChat(baseUrl, model, userMessage, SYSTEM_INSTRUCTION);
-        post(webview, { type: 'reply', text });
+        const userMessage = await buildChatUserMessage(rawText);
+        console.log('[Local AI] final user message (before Ollama):\n', userMessage);
+        console.log('[Local AI] final user message has [Symbol Match]:', userMessage.includes('[Symbol Match]'));
+        const ollamaMessages = buildOllamaChatMessages(
+          this.chatHistory,
+          userMessage,
+          getChatSystemPrompt(),
+        );
+        console.log('[Local AI] prior chatHistory length:', this.chatHistory.length);
+        console.log('[Local AI] prior chatHistory roles:', this.chatHistory.map((m) => m.role));
+        console.log('[Local AI] ollama messages (roles):', ollamaMessages.map((m) => m.role));
+        this.appendChatMessage({ role: 'user', text: rawText });
+        post(webview, { type: 'replyStart' });
+        let assistantText = '';
+        try {
+          await ollamaChatMessagesStream(baseUrl, model, ollamaMessages, (chunk) => {
+            assistantText += chunk;
+            post(webview, { type: 'replyDelta', text: chunk });
+          });
+          post(webview, { type: 'replyDone' });
+          this.appendChatMessage({ role: 'assistant', text: assistantText });
+        } catch (streamErr) {
+          const errText = streamErr instanceof Error ? streamErr.message : String(streamErr);
+          const assistantPersist =
+            assistantText.length > 0
+              ? `${assistantText}\n\nError: ${errText}`
+              : `Error: ${errText}`;
+          this.appendChatMessage({ role: 'assistant', text: assistantPersist });
+          post(webview, { type: 'error', text: errText });
+          post(webview, { type: 'replyDone' });
+        }
       } catch (e) {
         const text = e instanceof Error ? e.message : String(e);
+        this.appendChatMessage({ role: 'assistant', text: `Error: ${text}` });
         post(webview, { type: 'error', text });
+        post(webview, { type: 'replyDone' });
       }
     });
   }
@@ -193,6 +285,86 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
 function post(webview: vscode.Webview, msg: ExtensionToWebview): void {
   void webview.postMessage(msg);
+}
+
+function loadChatHistory(context: vscode.ExtensionContext): ChatMessage[] {
+  const raw = context.workspaceState.get<unknown>(CHAT_HISTORY_KEY);
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const messages: ChatMessage[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const o = item as { role?: string; text?: string };
+    if ((o.role === 'user' || o.role === 'assistant') && typeof o.text === 'string') {
+      messages.push({ role: o.role, text: o.text });
+    }
+  }
+  return messages.slice(-MAX_CHAT_HISTORY);
+}
+
+/**
+ * Closes only a TextDiff tab whose modified side is the in-memory preview URI.
+ * Never closes TabInputText / ordinary editor tabs. No-op if no match. Never throws.
+ */
+async function closePreviewTab(previewUri: vscode.Uri): Promise<void> {
+  try {
+    const target = previewUri.toString();
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const input = tab.input;
+        if (!(input instanceof vscode.TabInputTextDiff)) {
+          continue;
+        }
+        if (input.modified.scheme !== LOCALAI_PREVIEW_SCHEME) {
+          continue;
+        }
+        if (input.modified.toString() !== target) {
+          continue;
+        }
+        await vscode.window.tabGroups.close(tab);
+        return;
+      }
+    }
+  } catch {
+    // ignore — must not block Accept / Reject
+  }
+}
+
+/**
+ * Basic /edit output checks after model returns (no auto-repair).
+ * Returns an error message, or null if OK.
+ */
+function validateEditModelOutput(oldText: string, modelText: string, newText: string): string | null {
+  if (modelText.trim().length === 0) {
+    return '模型回傳為空，已拒絕預覽。';
+  }
+  const rawHead = modelText.trimStart();
+  if (rawHead.startsWith('以下是') || rawHead.toLowerCase().startsWith('here is')) {
+    return '模型回傳以說明文字開頭（以下是／Here is），已拒絕預覽。';
+  }
+  const cleanedHead = newText.trimStart();
+  if (cleanedHead.startsWith('以下是')) {
+    return '清理後內容以「以下是」開頭，疑似說明文字而非完整檔案，已拒絕預覽。';
+  }
+  if (cleanedHead.startsWith('說明')) {
+    return '清理後內容以「說明」開頭，疑似說明文字而非完整檔案，已拒絕預覽。';
+  }
+  if (cleanedHead.toLowerCase().startsWith('explanation')) {
+    return '清理後內容以 Explanation 開頭，疑似說明文字而非完整檔案，已拒絕預覽。';
+  }
+  if (cleanedHead.toLowerCase().startsWith('here is')) {
+    return '清理後內容以 Here is 開頭，疑似說明文字而非完整檔案，已拒絕預覽。';
+  }
+  if (newText.slice(0, 300).includes('```')) {
+    return '清理後內容前 300 字內含有 markdown fence（```），已拒絕預覽。';
+  }
+  if (oldText.length > 0 && newText.length < oldText.length * 0.3) {
+    return '模型回傳過短（低於原檔長度 30%），已拒絕預覽。';
+  }
+  return null;
 }
 
 /**
@@ -325,119 +497,6 @@ async function handleApplyDiffPreview(
   void vscode.window.showInformationMessage(
     '已開啟 diff 預覽：左側為目前編輯器緩衝區；右側為套用 diff 後的記憶體預覽。不會自動寫入磁碟；請自行比對後再於左側儲存或手動套用變更。',
   );
-}
-
-/**
- * /edit v0.2: model outputs full modified file; optional selection is edit focus only.
- */
-function buildEditUserMessage(instruction: string, editor: vscode.TextEditor): string {
-  const doc = editor.document;
-  const filePath = doc.uri.fsPath;
-  const languageId = doc.languageId;
-  const fullFileContent = doc.getText();
-  const selectedRaw = doc.getText(editor.selection);
-  const hasSelection = selectedRaw.trim().length > 0;
-  const sel = editor.selection;
-  const startLine0 = Math.min(sel.start.line, sel.end.line);
-  const endLine0 = Math.max(sel.start.line, sel.end.line);
-  const selectionStart = startLine0 + 1;
-  const selectionEnd = endLine0 + 1;
-
-  const contextMode = hasSelection ? 'selection' : 'full-file';
-
-  const parts: string[] = [
-    'Command: /edit (full-file preview — 不會寫入磁碟)',
-    '',
-    'Edit Instruction:',
-    instruction.length > 0 ? instruction : '(未提供額外說明，請依程式意圖提出最小合理修改)',
-    '',
-    `Context Mode: ${contextMode}`,
-    '',
-    'Active File:',
-    filePath,
-    '',
-    'Language:',
-    languageId,
-    '',
-    '重要：你的輸出必須是「完整修改後的檔案內容」純文字（與下方整檔同一結構），不是 unified diff、不是 patch、不是摘要。',
-    '無論是否有 selection，都必須輸出整份檔案；未改動的段落需原樣保留。',
-    'Selection（若有）僅標示修改焦點，輸出仍須為整檔。',
-    '',
-  ];
-
-  if (hasSelection) {
-    parts.push(
-      'Edit focus (selection — 請優先在此範圍內改動，但回覆仍須包含整份檔案):',
-      '',
-      `selectionStart (line, 1-based): ${selectionStart}`,
-      `selectionEnd (line, 1-based): ${selectionEnd}`,
-      '',
-      'Selected text:',
-      selectedRaw,
-      '',
-    );
-  }
-
-  parts.push(
-    'Current full file (請據此產出修改後的完整檔案內容):',
-    fullFileContent,
-    '',
-    '請只輸出完整修改後的檔案內容（純文字）。',
-  );
-
-  return parts.join('\n');
-}
-
-/**
- * Builds the user-role message: context mode + question + file fields + code context
- * (selection OR full file, never both as primary code body).
- */
-function buildChatUserMessage(userQuestion: string): string {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor) {
-    return ['Context Mode: no-editor', '', 'User Question:', userQuestion].join('\n');
-  }
-
-  const doc = editor.document;
-  const filePath = doc.uri.fsPath;
-  const languageId = doc.languageId;
-  const selectedRaw = doc.getText(editor.selection);
-  const hasSelection = selectedRaw.trim().length > 0;
-
-  if (hasSelection) {
-    return [
-      'Context Mode: selection',
-      '',
-      'User Question:',
-      userQuestion,
-      '',
-      'Active File:',
-      filePath,
-      '',
-      'Language:',
-      languageId,
-      '',
-      'Code Context (selection — 請優先分析此段):',
-      selectedRaw,
-    ].join('\n');
-  }
-
-  const fullFileContent = doc.getText();
-  return [
-    'Context Mode: full-file',
-    '',
-    'User Question:',
-    userQuestion,
-    '',
-    'Active File:',
-    filePath,
-    '',
-    'Language:',
-    languageId,
-    '',
-    'Code Context (full file):',
-    fullFileContent,
-  ].join('\n');
 }
 
 function getHtml(scriptUri: vscode.Uri, nonce: string, cspSource: string): string {

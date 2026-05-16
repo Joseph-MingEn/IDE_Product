@@ -12,5 +12,5 @@
     "moduleResolution": "node",
     "types": ["node", "vscode"]
   },
-  "include": ["src/extension.ts", "src/ollama.ts", "src/protocol.ts"]
+  "include": ["src/extension.ts", "src/ollama.ts", "src/protocol.ts", "src/repoContext.ts"]
 }

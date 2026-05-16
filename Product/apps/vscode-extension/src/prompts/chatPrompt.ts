@@ -7,6 +7,8 @@ import {
   detectExplicitIntent,
   type ExplicitIntent,
 } from './explicitIntent';
+import { wantsFullFileContent } from '../fileOutline';
+import { buildEditorFileContext } from '../repoContext';
 import {
   appendRepoContextParts,
   extractExplicitContextRefs,
@@ -26,7 +28,7 @@ export function getChatSystemPrompt(): string {
     '- 請使用繁體中文回答。',
     '- 當 Context Mode 為 explicit-context 時，嚴格遵守 Intent 與 Explicit intent routing（高於一般習慣）。',
     '  - @xxx 是 context selector，不是普通提問文字。',
-    '  - Intent: file-overview → 只以 [File Match] 做整檔架構說明；禁止把答案縮成單一 class（如 ChatViewProvider）除非使用者 @ 了該 symbol。',
+    '  - Intent: file-overview → 以 [File Match] 的 File Outline + Key sections 做整檔架構說明；Raw excerpt 僅輔助；禁止只講單一 class。',
     '  - Intent: symbol-lifecycle → [Symbol Match] 為主解釋流程/生命週期；[File Match] 僅說明其在檔案中的位置。',
     '  - Intent: symbol-explanation → [Symbol Match] 為主；[File Match] 僅輔助。',
     '  - Intent: definition-lookup → 第一句 = File + Line + Symbol。',
@@ -34,6 +36,7 @@ export function getChatSystemPrompt(): string {
     '  - 不要泛泛介紹整個 extension；不要猜測 context 未提供的檔案。',
     '- 當 Context Mode 為 symbol-match 時：',
     '  - [Symbol Match] 為最高優先級；禁止引用 Active File、禁止猜測其他檔案。',
+    '- 當 Context Mode 為 file-outline 時：以 File Outline 為主，Raw excerpt 僅輔助。',
     '- 當訊息中含有 [Symbol Match]、[File Match]、Code Context 或其他 Context Mode 時，請優先依據這些內容作答。',
     '- 若訊息未提供某檔案或程式碼，請勿假裝已讀過；可說明需要更多資訊，但仍應盡力回答，避免不必要的拒絕。',
     '- 程式相關問題請給實用、具體的建議；一般對話可簡潔直接回答。',
@@ -114,11 +117,15 @@ export async function buildChatUserMessage(userQuestion: string): Promise<string
 
   if (explicit) {
     const refs = extractExplicitContextRefs(userQuestion);
-    const { symbolBlock, fileBlock } = await fetchExplicitContextParts(refs);
+    const shapeProbe = {
+      hasSymbolMatch: refs.symbols.length > 0,
+      hasFileMatch: refs.files.length > 0,
+    };
+    const intent = detectExplicitIntent(userQuestion, shapeProbe);
+    const { symbolBlock, fileBlock } = await fetchExplicitContextParts(refs, intent);
     const hasSymbolMatch = symbolBlock.includes('[Symbol Match]');
     const hasFileMatch = fileBlock.includes('[File Match]');
     const shape = { hasSymbolMatch, hasFileMatch };
-    const intent = detectExplicitIntent(userQuestion, shape);
     const repoBlock = assembleExplicitRepoBlock(symbolBlock, fileBlock, intent);
     console.log('[Local AI][chat] explicit intent:', intent, 'shape:', shape, 'repoBlock length:', repoBlock.length);
     const out = buildExplicitContextUserMessage(userQuestion, repoBlock, intent, hasSymbolMatch, hasFileMatch);
@@ -178,8 +185,33 @@ export async function buildChatUserMessage(userQuestion: string): Promise<string
     return out;
   }
 
+  const rel = vscode.workspace.asRelativePath(doc.uri, false);
+  const fullText = doc.getText();
+
+  if (wantsFullFileContent(userQuestion)) {
+    const parts = [
+      'Context Mode: full-file',
+      '',
+      'User Question:',
+      userQuestion,
+      '',
+      'Active File:',
+      filePath,
+      '',
+      'Language:',
+      languageId,
+      '',
+      'Code Context (full file — user requested verbatim):',
+      fullText,
+    ];
+    const out = parts.join('\n');
+    console.log('[Local AI][chat] final user message (full-file explicit):\n', out);
+    return out;
+  }
+
+  const { outline, background } = buildEditorFileContext(fullText, rel, true);
   const parts = [
-    'Context Mode: full-file',
+    'Context Mode: file-outline',
     '',
     'User Question:',
     userQuestion,
@@ -190,10 +222,14 @@ export async function buildChatUserMessage(userQuestion: string): Promise<string
     'Language:',
     languageId,
     '',
-    'Code Context (full file):',
-    doc.getText(),
+    'Code Context (file outline — PRIMARY):',
+    outline,
   ];
+  if (background.length > 0) {
+    parts.push('', 'Code Context (file excerpt — BACKGROUND, truncated):', '```' + languageId, background, '```');
+  }
+  appendRepoContextParts(parts, repoBlock);
   const out = parts.join('\n');
-  console.log('[Local AI][chat] final user message (full-file):\n', out);
+  console.log('[Local AI][chat] final user message (file-outline):\n', out);
   return out;
 }

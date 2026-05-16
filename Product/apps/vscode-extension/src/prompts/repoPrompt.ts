@@ -3,9 +3,10 @@ import {
   buildRepoContextSection,
   findFileMatches,
   findSymbolDefinitions,
-  formatFileMatches,
+  formatFileMatchesForIntent,
   formatSymbolMatches,
 } from '../repoContext';
+import type { ExplicitIntent } from './explicitIntent';
 
 /** Section label when repo excerpts are attached to a chat user message. */
 export const REPO_CONTEXT_SECTION_LABEL = 'Repo Context (workspace — auto-matched excerpts)';
@@ -63,7 +64,10 @@ export type ExplicitContextParts = {
 };
 
 /** Fetch [Symbol Match] and [File Match] blocks separately for intent-based ordering. */
-export async function fetchExplicitContextParts(refs: ExplicitContextRefs): Promise<ExplicitContextParts> {
+export async function fetchExplicitContextParts(
+  refs: ExplicitContextRefs,
+  intent: ExplicitIntent,
+): Promise<ExplicitContextParts> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     return { symbolBlock: '', fileBlock: '' };
@@ -90,7 +94,8 @@ export async function fetchExplicitContextParts(refs: ExplicitContextRefs): Prom
       fileMatches.map((f) => f.rel),
     );
     if (fileMatches.length > 0) {
-      fileBlock = formatFileMatches(fileMatches);
+      fileBlock = formatFileMatchesForIntent(fileMatches, intent);
+      console.log('[Local AI][repo] file context mode:', intent === 'file-overview' ? 'outline-primary' : 'compact');
     }
   }
 
@@ -98,8 +103,11 @@ export async function fetchExplicitContextParts(refs: ExplicitContextRefs): Prom
 }
 
 /** Build combined explicit context (default: symbol blocks before file blocks). */
-export async function fetchExplicitContextBlock(refs: ExplicitContextRefs): Promise<string> {
-  const { symbolBlock, fileBlock } = await fetchExplicitContextParts(refs);
+export async function fetchExplicitContextBlock(
+  refs: ExplicitContextRefs,
+  intent: ExplicitIntent = 'file-overview',
+): Promise<string> {
+  const { symbolBlock, fileBlock } = await fetchExplicitContextParts(refs, intent);
   const block = [symbolBlock, fileBlock].filter((s) => s.length > 0).join('\n\n');
   console.log('[Local AI][repo] explicit context block length:', block.length);
   return block;

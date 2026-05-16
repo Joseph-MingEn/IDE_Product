@@ -111,24 +111,24 @@ export function buildExplicitIntentHints(intent: ExplicitIntent, shape: Explicit
       break;
     case 'file-overview':
       lines.push(
-        '- Primary goal: FILE-LEVEL architecture overview (entire file in [File Match]).',
-        '- Cover: module purpose, major components, registration/activation, message flow, and how pieces connect.',
-        '- Do NOT make a single class (e.g. ChatViewProvider) the whole answer unless the user @mentioned that symbol as the focus.',
-        '- Do NOT default to “this extension does X” generic marketing text—use concrete structure from [File Match].',
+        '- Primary goal: FILE-LEVEL architecture overview using [File Match] → File Outline + Key sections.',
+        '- Use Imports, Exports, activate/deactivate, Classes, Methods, Message handlers from the outline.',
+        '- Raw file excerpt is BACKGROUND only—do not base the whole answer on a single class snippet.',
+        '- Do NOT make a single class (e.g. ChatViewProvider) the whole answer unless the user @mentioned that symbol.',
       );
       if (shape.hasSymbolMatch) {
         lines.push(
-          '- [File Match] is PRIMARY; [Symbol Match] is optional background—do not let one symbol dominate the overview.',
+          '- [File Match] outline is PRIMARY; [Symbol Match] is optional background—do not let one symbol dominate.',
         );
       } else {
-        lines.push('- Only [File Match] is provided: analyze the full file, not one type/class in isolation.');
+        lines.push('- Only [File Match] is provided: synthesize the whole module from the outline, not one class.');
       }
       break;
     case 'symbol-lifecycle':
       lines.push(
         '- Primary goal: explain the @symbol lifecycle, flow, interactions, and call relationships.',
         '- [Symbol Match] is the MAIN analysis target (definition, methods, resolve/register, message handlers).',
-        '- [File Match] is BACKGROUND only—use it to explain how the symbol fits the file architecture.',
+        '- [File Match] File Outline is BACKGROUND only—use it to explain how the symbol fits the file architecture.',
         '- Describe: creation, key methods, what triggers it, what it calls, and how it relates to neighboring code.',
         '- Do not give a generic extension-wide essay; stay anchored to the @symbol and its file.',
       );

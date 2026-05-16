@@ -1,4 +1,10 @@
 import * as vscode from 'vscode';
+import {
+  buildFileOutlineData,
+  buildKeySectionsSnippet,
+  formatFileOutlineMarkdown,
+  truncateBackgroundFileContent,
+} from './fileOutline';
 
 const MAX_FIND_FILES = 800;
 const MAX_SYMBOL_MATCHES = 5;
@@ -96,9 +102,13 @@ export type FileMatch = {
   uri: vscode.Uri;
   rel: string;
   fileName: string;
-  snippet: string;
+  outlineMarkdown: string;
+  keySections: string;
+  backgroundSnippet: string;
   score: number;
 };
+
+export type FileMatchFormatMode = 'overview-primary' | 'compact';
 
 /** camelCase / PascalCase identifiers (case preserved). */
 export function extractSymbolNames(question: string): string[] {
@@ -462,13 +472,17 @@ function scoreFileCandidateRel(rel: string): number {
   return score;
 }
 
-function truncateFileContent(text: string): string {
-  const lines = text.split(/\r?\n/);
-  const byLines = lines.slice(0, MAX_FILE_CONTEXT_LINES).join('\n');
-  if (byLines.length <= MAX_FILE_CONTEXT_CHARS) {
-    return byLines;
-  }
-  return byLines.slice(0, MAX_FILE_CONTEXT_CHARS);
+function buildFileMatchFromText(uri: vscode.Uri, rel: string, fileName: string, text: string): FileMatch {
+  const outlineData = buildFileOutlineData(text, rel);
+  return {
+    uri,
+    rel,
+    fileName,
+    outlineMarkdown: formatFileOutlineMarkdown(outlineData),
+    keySections: buildKeySectionsSnippet(text, outlineData),
+    backgroundSnippet: truncateBackgroundFileContent(text),
+    score: scoreFileCandidateRel(rel),
+  };
 }
 
 /** Resolve @filename to best workspace file (prefers src/, excludes out/vendor). */
@@ -510,13 +524,7 @@ export async function findFileByName(fileName: string): Promise<FileMatch | null
   const rel = vscode.workspace.asRelativePath(uri, false);
   try {
     const text = await readFileText(uri);
-    return {
-      uri,
-      rel,
-      fileName: normalized,
-      snippet: truncateFileContent(text),
-      score: scoreFileCandidateRel(rel),
-    };
+    return buildFileMatchFromText(uri, rel, normalized, text);
   } catch {
     return null;
   }
@@ -540,21 +548,63 @@ export async function findFileMatches(fileNames: string[]): Promise<FileMatch[]>
   return results.sort((a, b) => b.score - a.score);
 }
 
-export function formatFileMatches(matches: FileMatch[]): string {
-  const blocks: string[] = [];
-  for (const m of matches) {
-    const lang = fenceLangForPath(m.rel);
-    const fence = lang.length > 0 ? lang : 'text';
-    blocks.push(
-      '[File Match]',
-      `File: ${m.rel}`,
-      '',
+function formatSingleFileMatch(m: FileMatch, mode: FileMatchFormatMode): string {
+  const lang = fenceLangForPath(m.rel);
+  const fence = lang.length > 0 ? lang : 'text';
+  const parts: string[] = ['[File Match]', `File: ${m.rel}`, ''];
+
+  if (mode === 'overview-primary') {
+    parts.push(m.outlineMarkdown, '');
+    if (m.keySections.length > 0) {
+      parts.push(m.keySections, '');
+    }
+    parts.push(
+      '### Raw file excerpt (background, truncated)',
       '```' + fence,
-      m.snippet,
+      m.backgroundSnippet,
+      '```',
+    );
+  } else {
+    parts.push(m.outlineMarkdown, '');
+    parts.push(
+      '### Raw file excerpt (background, truncated)',
+      '```' + fence,
+      m.backgroundSnippet,
       '```',
     );
   }
-  return blocks.join('\n');
+
+  return parts.join('\n');
+}
+
+export function formatFileMatches(matches: FileMatch[], mode: FileMatchFormatMode = 'overview-primary'): string {
+  return matches.map((m) => formatSingleFileMatch(m, mode)).join('\n\n');
+}
+
+/** file-overview → outline + key sections primary; other intents → compact outline. */
+export function formatFileMatchesForIntent(
+  matches: FileMatch[],
+  intent: 'file-overview' | 'symbol-lifecycle' | 'symbol-explanation' | 'definition-lookup',
+): string {
+  const mode: FileMatchFormatMode = intent === 'file-overview' ? 'overview-primary' : 'compact';
+  return formatFileMatches(matches, mode);
+}
+
+/** Build outline + optional background for active editor (general chat). */
+export function buildEditorFileContext(
+  text: string,
+  rel: string,
+  includeBackground: boolean,
+): { outline: string; background: string } {
+  const match = buildFileMatchFromText(vscode.Uri.file(rel), rel, rel.split('/').pop() ?? rel, text);
+  const outlineParts = [match.outlineMarkdown];
+  if (match.keySections.length > 0) {
+    outlineParts.push('', match.keySections);
+  }
+  return {
+    outline: outlineParts.join('\n'),
+    background: includeBackground ? match.backgroundSnippet : '',
+  };
 }
 
 /**

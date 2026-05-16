@@ -61,6 +61,7 @@ export function hasExplicitContextRefs(question: string): boolean {
 export type ExplicitContextParts = {
   symbolBlock: string;
   fileBlock: string;
+  matchedFilePaths: string[];
 };
 
 /** Fetch [Symbol Match] and [File Match] blocks separately for intent-based ordering. */
@@ -70,11 +71,12 @@ export async function fetchExplicitContextParts(
 ): Promise<ExplicitContextParts> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
-    return { symbolBlock: '', fileBlock: '' };
+    return { symbolBlock: '', fileBlock: '', matchedFilePaths: [] };
   }
 
   let symbolBlock = '';
   let fileBlock = '';
+  const matchedFilePaths: string[] = [];
 
   if (refs.symbols.length > 0) {
     const symbolMatches = await findSymbolDefinitions(refs.symbols);
@@ -89,17 +91,28 @@ export async function fetchExplicitContextParts(
 
   if (refs.files.length > 0) {
     const fileMatches = await findFileMatches(refs.files);
-    console.log(
-      '[Local AI][repo] explicit file matches:',
-      fileMatches.map((f) => f.rel),
-    );
+    for (const f of fileMatches) {
+      matchedFilePaths.push(f.rel);
+    }
+    console.log('[Local AI][payload] explicit file refs:', refs.files);
+    console.log('[Local AI][payload] matched file paths:', matchedFilePaths);
     if (fileMatches.length > 0) {
       fileBlock = formatFileMatchesForIntent(fileMatches, intent);
+      console.log(
+        '[Local AI][payload] fileBlock.length:',
+        fileBlock.length,
+        'hasFileMatch=',
+        fileBlock.includes('[File Match]'),
+        'intent=',
+        intent,
+      );
       console.log('[Local AI][repo] file context mode:', intent === 'file-overview' ? 'outline-primary' : 'compact');
+    } else {
+      console.warn('[Local AI][payload] explicit @file: no workspace file match for', refs.files);
     }
   }
 
-  return { symbolBlock, fileBlock };
+  return { symbolBlock, fileBlock, matchedFilePaths };
 }
 
 /** Build combined explicit context (default: symbol blocks before file blocks). */

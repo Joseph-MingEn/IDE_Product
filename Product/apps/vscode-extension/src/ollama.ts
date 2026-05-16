@@ -1,3 +1,5 @@
+import { logOllamaPayload } from './debugPayload';
+
 type OllamaChatResponse = {
   message?: { role: string; content: string };
   error?: string;
@@ -66,8 +68,7 @@ export async function ollamaChatMessagesStream(
     messages,
     stream: true,
   };
-  console.log('[Local AI] ollamaChatMessagesStream messages', messages);
-  console.log('[Local AI] fetch /api/chat body.messages', body.messages);
+  logOllamaPayload(model, messages);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -138,10 +139,13 @@ function parseOllamaStreamLine(line: string, onDelta: (chunk: string) => void): 
     throw new Error('Invalid Ollama stream line: not JSON');
   }
   if (typeof data.error === 'string' && data.error.length > 0) {
+    console.error('[Local AI][payload] Ollama stream error field:', data.error);
     throw new Error(data.error);
   }
   const content = data.message?.content;
   if (typeof content === 'string' && content.length > 0) {
     onDelta(content);
+  } else if (data.done === true && !content) {
+    console.log('[Local AI][payload] stream line done=true, no message.content chunk');
   }
 }

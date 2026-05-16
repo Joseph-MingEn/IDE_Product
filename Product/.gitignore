@@ -93,3 +93,6 @@ Thumbs.db
 # --- Logs ---
 *.log
 logs/
+
+# ---references---
+references/

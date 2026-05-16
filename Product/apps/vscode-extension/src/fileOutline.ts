@@ -2,6 +2,8 @@
 
 const MAX_BACKGROUND_CHARS = 4_000;
 const MAX_BACKGROUND_LINES = 80;
+/** Optional tail excerpt for file-overview (kept small so outline dominates). */
+export const MAX_OVERVIEW_OPTIONAL_EXCERPT_CHARS = 1_200;
 const MAX_KEY_SECTION_LINES = 35;
 const MAX_METHODS_PER_CLASS = 24;
 
@@ -217,6 +219,18 @@ export function truncateBackgroundFileContent(text: string): string {
     out = out.slice(0, MAX_BACKGROUND_CHARS);
   }
   return out;
+}
+
+/** Small optional excerpt at end of file-overview [File Match] (1000–1500 chars). */
+export function truncateOverviewOptionalExcerpt(
+  text: string,
+  maxChars: number = MAX_OVERVIEW_OPTIONAL_EXCERPT_CHARS,
+): string {
+  const cap = Math.min(Math.max(maxChars, 1_000), 1_500);
+  if (text.length <= cap) {
+    return text;
+  }
+  return text.slice(0, cap);
 }
 
 /** Whether the user explicitly wants the entire file verbatim in context. */

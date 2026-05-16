@@ -3,6 +3,11 @@ import * as vscode from 'vscode';
 import { LOCALAI_PREVIEW_SCHEME, LocalaiDiffPreviewProvider } from './diffPreviewProvider';
 import { ollamaChat, ollamaChatMessagesStream } from './ollama';
 import {
+  CLEAR_CHAT_HISTORY_ON_DEBUG_ACTIVATE,
+  logUserMessagePayloadPreview,
+  SKIP_CHAT_HISTORY_FOR_DEBUG,
+} from './debugPayload';
+import {
   buildChatUserMessage,
   buildOllamaChatMessages,
   getChatSystemPrompt,
@@ -47,6 +52,15 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly context: vscode.ExtensionContext,
   ) {
     this.chatHistory = loadChatHistory(this.context);
+    if (SKIP_CHAT_HISTORY_FOR_DEBUG && CLEAR_CHAT_HISTORY_ON_DEBUG_ACTIVATE && this.chatHistory.length > 0) {
+      console.log(
+        '[Local AI][payload] clearing workspace chat history (v0.9.3 debug, was',
+        this.chatHistory.length,
+        'messages)',
+      );
+      this.chatHistory = [];
+      void this.context.workspaceState.update(CHAT_HISTORY_KEY, []);
+    }
   }
 
   private persistChatHistory(): void {
@@ -243,16 +257,15 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         }
 
         const userMessage = await buildChatUserMessage(rawText);
-        console.log('[Local AI] final user message (before Ollama):\n', userMessage);
-        console.log('[Local AI] final user message has [Symbol Match]:', userMessage.includes('[Symbol Match]'));
+        logUserMessagePayloadPreview(userMessage, 'final user (before Ollama)');
         const ollamaMessages = buildOllamaChatMessages(
           this.chatHistory,
           userMessage,
           getChatSystemPrompt(),
         );
-        console.log('[Local AI] prior chatHistory length:', this.chatHistory.length);
-        console.log('[Local AI] prior chatHistory roles:', this.chatHistory.map((m) => m.role));
-        console.log('[Local AI] ollama messages (roles):', ollamaMessages.map((m) => m.role));
+        if (SKIP_CHAT_HISTORY_FOR_DEBUG) {
+          console.log('[Local AI][payload] chatHistory ignored for Ollama; stored length=', this.chatHistory.length);
+        }
         this.appendChatMessage({ role: 'user', text: rawText });
         post(webview, { type: 'replyStart' });
         let assistantText = '';

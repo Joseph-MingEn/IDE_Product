@@ -4,6 +4,7 @@ import {
   buildKeySectionsSnippet,
   formatFileOutlineMarkdown,
   truncateBackgroundFileContent,
+  truncateOverviewOptionalExcerpt,
 } from './fileOutline';
 
 const MAX_FIND_FILES = 800;
@@ -472,7 +473,8 @@ function scoreFileCandidateRel(rel: string): number {
   return score;
 }
 
-function buildFileMatchFromText(uri: vscode.Uri, rel: string, fileName: string, text: string): FileMatch {
+/** Build a FileMatch from source text (used by findFileByName and golden tests). */
+export function createFileMatchFromText(uri: vscode.Uri, rel: string, fileName: string, text: string): FileMatch {
   const outlineData = buildFileOutlineData(text, rel);
   return {
     uri,
@@ -524,7 +526,7 @@ export async function findFileByName(fileName: string): Promise<FileMatch | null
   const rel = vscode.workspace.asRelativePath(uri, false);
   try {
     const text = await readFileText(uri);
-    return buildFileMatchFromText(uri, rel, normalized, text);
+    return createFileMatchFromText(uri, rel, normalized, text);
   } catch {
     return null;
   }
@@ -548,32 +550,47 @@ export async function findFileMatches(fileNames: string[]): Promise<FileMatch[]>
   return results.sort((a, b) => b.score - a.score);
 }
 
+const OVERVIEW_OPTIONAL_EXCERPT_HEADING =
+  '### Background excerpt only — do not summarize from this first.';
+
+function formatOverviewPrimaryFileMatch(m: FileMatch, fence: string): string {
+  const parts: string[] = ['[File Match]', `File: ${m.rel}`, '', m.outlineMarkdown];
+  const hasOutline = m.outlineMarkdown.trim().length > 0;
+  const hasKeySections = m.keySections.trim().length > 0;
+
+  if (hasKeySections) {
+    parts.push('', m.keySections);
+  }
+
+  // Outline + key sections are PRIMARY; skip raw when both exist.
+  if (hasOutline && hasKeySections) {
+    return parts.join('\n');
+  }
+
+  const optionalExcerpt = truncateOverviewOptionalExcerpt(m.backgroundSnippet);
+  if (optionalExcerpt.length === 0) {
+    return parts.join('\n');
+  }
+
+  parts.push('', OVERVIEW_OPTIONAL_EXCERPT_HEADING, '```' + fence, optionalExcerpt, '```');
+  return parts.join('\n');
+}
+
 function formatSingleFileMatch(m: FileMatch, mode: FileMatchFormatMode): string {
   const lang = fenceLangForPath(m.rel);
   const fence = lang.length > 0 ? lang : 'text';
-  const parts: string[] = ['[File Match]', `File: ${m.rel}`, ''];
 
   if (mode === 'overview-primary') {
-    parts.push(m.outlineMarkdown, '');
-    if (m.keySections.length > 0) {
-      parts.push(m.keySections, '');
-    }
-    parts.push(
-      '### Raw file excerpt (background, truncated)',
-      '```' + fence,
-      m.backgroundSnippet,
-      '```',
-    );
-  } else {
-    parts.push(m.outlineMarkdown, '');
-    parts.push(
-      '### Raw file excerpt (background, truncated)',
-      '```' + fence,
-      m.backgroundSnippet,
-      '```',
-    );
+    return formatOverviewPrimaryFileMatch(m, fence);
   }
 
+  const parts: string[] = ['[File Match]', `File: ${m.rel}`, '', m.outlineMarkdown, ''];
+  parts.push(
+    '### Raw file excerpt (background, truncated)',
+    '```' + fence,
+    m.backgroundSnippet,
+    '```',
+  );
   return parts.join('\n');
 }
 
@@ -596,7 +613,7 @@ export function buildEditorFileContext(
   rel: string,
   includeBackground: boolean,
 ): { outline: string; background: string } {
-  const match = buildFileMatchFromText(vscode.Uri.file(rel), rel, rel.split('/').pop() ?? rel, text);
+  const match = createFileMatchFromText(vscode.Uri.file(rel), rel, rel.split('/').pop() ?? rel, text);
   const outlineParts = [match.outlineMarkdown];
   if (match.keySections.length > 0) {
     outlineParts.push('', match.keySections);

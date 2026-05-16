@@ -97,66 +97,6 @@ export function detectExplicitIntent(
   return 'symbol-explanation';
 }
 
-/** Per-intent instructions placed in the user message (routing hints). */
-export function buildExplicitIntentHints(intent: ExplicitIntent, shape: ExplicitContextShape): string {
-  const lines: string[] = ['Explicit intent routing:'];
-
-  switch (intent) {
-    case 'definition-lookup':
-      lines.push(
-        '- Primary goal: answer WHERE the symbol is defined.',
-        '- Use [Symbol Match] only: first sentence = File + Line + Symbol.',
-        '- Do not summarize unrelated classes or the whole extension.',
-      );
-      break;
-    case 'file-overview':
-      lines.push(
-        '- Primary goal: FILE-LEVEL architecture overview using [File Match] → File Outline + Key sections.',
-        '- Use Imports, Exports, activate/deactivate, Classes, Methods, Message handlers from the outline.',
-        '- Raw file excerpt is BACKGROUND only—do not base the whole answer on a single class snippet.',
-        '- Do NOT make a single class (e.g. ChatViewProvider) the whole answer unless the user @mentioned that symbol.',
-      );
-      if (shape.hasSymbolMatch) {
-        lines.push(
-          '- [File Match] outline is PRIMARY; [Symbol Match] is optional background—do not let one symbol dominate.',
-        );
-      } else {
-        lines.push('- Only [File Match] is provided: synthesize the whole module from the outline, not one class.');
-      }
-      break;
-    case 'symbol-lifecycle':
-      lines.push(
-        '- Primary goal: explain the @symbol lifecycle, flow, interactions, and call relationships.',
-        '- [Symbol Match] is the MAIN analysis target (definition, methods, resolve/register, message handlers).',
-        '- [File Match] File Outline is BACKGROUND only—use it to explain how the symbol fits the file architecture.',
-        '- Describe: creation, key methods, what triggers it, what it calls, and how it relates to neighboring code.',
-        '- Do not give a generic extension-wide essay; stay anchored to the @symbol and its file.',
-      );
-      break;
-    case 'symbol-explanation':
-      lines.push(
-        '- Primary goal: explain what the @symbol does and how it works.',
-        '- [Symbol Match] is the primary source.',
-        shape.hasFileMatch
-          ? '- [File Match] is supplementary background—not the main subject.'
-          : '- Answer from [Symbol Match] definition and surrounding snippet.',
-      );
-      break;
-    default:
-      break;
-  }
-
-  if (shape.hasFileMatch && !shape.hasSymbolMatch) {
-    lines.push('- Context shape: file-only → entire file architecture is the subject.');
-  } else if (shape.hasSymbolMatch && shape.hasFileMatch) {
-    lines.push('- Context shape: symbol + file → follow Intent above for primary vs background.');
-  } else if (shape.hasSymbolMatch) {
-    lines.push('- Context shape: symbol-only → use [Symbol Match] only.');
-  }
-
-  return lines.join('\n');
-}
-
 /** file-overview puts [File Match] before [Symbol Match]; others keep symbol first. */
 export function shouldPutFileMatchFirst(intent: ExplicitIntent): boolean {
   return intent === 'file-overview';

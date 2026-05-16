@@ -57,7 +57,9 @@
     "watch": "concurrently -k \"npm:watch:extension\" \"npm:watch:webview\"",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --outfile=out/extension.js --external:vscode --sourcemap --watch",
     "watch:webview": "esbuild src/webview/main.tsx --bundle --platform=browser --target=es2020 --format=iife --outfile=out/webview.js --loader:.tsx=tsx --jsx=automatic --sourcemap --watch",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/diff": "^7.0.2",
@@ -67,7 +69,8 @@
     "@types/vscode": "^1.85.0",
     "concurrently": "^8.2.2",
     "esbuild": "^0.21.5",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
   },
   "dependencies": {
     "diff": "^7.0.0",

@@ -1,13 +1,13 @@
 import type { OllamaChatMessage } from './ollama';
 
 /**
- * v0.9.3: set true to send only system + current user (no prior turns).
- * Disable after confirming payload reaches Ollama.
+ * When true: send only system + current user (no prior turns). For payload debugging only.
+ * Production default: false (multi-turn chat enabled).
  */
-export const SKIP_CHAT_HISTORY_FOR_DEBUG = true;
+export const SKIP_CHAT_HISTORY_FOR_DEBUG = false;
 
-/** Clears persisted chat history once when the webview provider starts (v0.9.3 debug). */
-export const CLEAR_CHAT_HISTORY_ON_DEBUG_ACTIVATE = true;
+/** When true: clears workspace chat history once on webview provider start. Debug only. */
+export const CLEAR_CHAT_HISTORY_ON_DEBUG_ACTIVATE = false;
 
 const USER_PREVIEW_CHARS = 2000;
 

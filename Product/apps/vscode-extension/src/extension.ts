@@ -265,8 +265,13 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
           userMessage,
           getChatSystemPrompt(),
         );
-        if (SKIP_CHAT_HISTORY_FOR_DEBUG) {
-          console.log('[Local AI][payload] chatHistory ignored for Ollama; stored length=', this.chatHistory.length);
+        if (!SKIP_CHAT_HISTORY_FOR_DEBUG) {
+          console.log(
+            '[Local AI][payload] multi-turn: prior turns sent to Ollama; stored history length=',
+            this.chatHistory.length,
+            'ollamaMessages.length=',
+            ollamaMessages.length,
+          );
         }
         this.appendChatMessage({ role: 'user', text: rawText });
         post(webview, { type: 'replyStart' });
